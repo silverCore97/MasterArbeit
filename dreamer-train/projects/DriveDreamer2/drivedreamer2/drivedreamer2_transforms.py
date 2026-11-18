@@ -209,7 +209,9 @@ class DriveDreamer2_Transform:
                 'frame_idx':data_dict['frame_idx'],
                 'cam_type':data_dict['cam_type'],
                 'video_length':data_dict['video_length'],
-                
+                'cam_token':data_dict['cam_token'],
+                'sample_token':data_dict['sample_token'],
+                'scene_token':data_dict['scene_token'],
              })
         if 'multiview_start_idx' in data_dict:
             new_data_dict.update({'multiview_start_idx':data_dict['multiview_start_idx'],})
@@ -231,6 +233,7 @@ class DriveDreamer2_Transform:
                     'image': image,
                     'input_image': input_image,
                     'prompt_embeds': prompt_embeds,
+                    'prompt': prompt,
                     # 'prompt': data_dict['prompts'],
                     'height': input_image.shape[1],
                     'width': input_image.shape[2],

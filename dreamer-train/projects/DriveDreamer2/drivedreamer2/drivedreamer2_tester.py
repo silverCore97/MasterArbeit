@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import math
 import shutil
@@ -64,6 +65,7 @@ class DriveDreamer2_Tester(Tester):
         local_files_only = model_config.get('local_files_only', True)
         pipeline_name = model_config.pipeline_name
         text_encoder_pretrained = model_config.get('text_encoder_pretrained',None)
+        self.mode = model_config.get('mode','img_cond')
         variant = 'fp16' if self.mixed_precision == 'fp16' else None
         if pipeline_name == 'DriveDreamer2Pipeline':
             model=DriveDreamer2Pipeline.from_pretrained(
@@ -73,20 +75,15 @@ class DriveDreamer2_Tester(Tester):
                 local_files_only=local_files_only,
                 safety_checker=None,
             )
-            if text_encoder_pretrained is None:
-                assert False
-            self.text_encoder = CLIPTextTransform(
-                model_path=text_encoder_pretrained,
-                device=self.device,
-                dtype=self.dtype,
-            )
+            # ### Test transforms provide cached prompt embeddings, so initialize
+            # the text encoder only if a batch lacks those embeddings.
+            self.text_encoder_pretrained = text_encoder_pretrained
+            self.text_encoder = None
             setattr(model, 'frame_num',8)
             # setattr(model, 'cam_num', self.cam_num)
             # model.load_clipTextTransformer()
         else:
             assert False
-        
-        self.mode = model_config.get('mode','img_cond')
         
         assert self.mode in ['img_cond','video_cond','wo_img']
 
@@ -118,6 +115,42 @@ class DriveDreamer2_Tester(Tester):
                 ['night, realistic autonomous driving scene, panoramic videos from different perspectives.'],
             ]
             for batch_dict in self.dataloader:
+                clip_name = f'{idx:06d}'
+                # ### Save the input clip and source nuScenes identifiers beside the results.
+                input_frames = [
+                    np.concatenate(
+                        [
+                            np.asarray(batch_dict['image'][t + self.frame_num * cam])
+                            for cam in range(self.cam_num)
+                        ],
+                        axis=1,
+                    )
+                    for t in range(self.frame_num)
+                ]
+                imageio.mimsave(
+                    os.path.join(save_dir, f'{clip_name}_input.mp4'),
+                    input_frames,
+                    fps=self.fps,
+                )
+                source_records = [
+                    {
+                        'camera_index': i // self.frame_num,
+                        'frame_offset': i % self.frame_num,
+                        'cam_token': batch_dict['cam_token'][i],
+                        'sample_token': batch_dict['sample_token'][i],
+                        'scene_token': batch_dict['scene_token'][i],
+                        'camera': batch_dict['cam_type'][i],
+                        'frame_idx': int(batch_dict['frame_idx'][i]),
+                    }
+                    for i in range(len(batch_dict['cam_token']))
+                ]
+                with open(os.path.join(save_dir, f'{clip_name}_sources.json'), 'w') as source_file:
+                    json.dump(source_records, source_file, indent=2)
+                prompt = batch_dict.get('prompt')
+                if prompt is not None:
+                    with open(os.path.join(save_dir, f'{clip_name}_prompt.json'), 'w') as prompt_file:
+                        json.dump({'prompt': prompt[0]}, prompt_file, indent=2)
+
                 grounding_downsampler_input = batch_dict.get('grounding_downsampler_input', None)
                 grounding_downsampler_input = grounding_downsampler_input.reshape(self.cam_num,self.frame_num,*grounding_downsampler_input.shape[1:]).permute(1,2,3,0,4).flatten(3,4)
                 box_downsampler_input = batch_dict.get('box_downsampler_input',None)
@@ -139,6 +172,16 @@ class DriveDreamer2_Tester(Tester):
                 
                 prompt_embed = batch_dict.get('prompt_embeds',None)
                 if prompt_embed is None:
+                    if self.text_encoder is None:
+                        if self.text_encoder_pretrained is None:
+                            raise ValueError(
+                                'Test batch has no prompt_embeds and no text_encoder_pretrained is configured.'
+                            )
+                        self.text_encoder = CLIPTextTransform(
+                            model_path=self.text_encoder_pretrained,
+                            device=self.device,
+                            dtype=self.dtype,
+                        )
                     videos = []
                     for this_prompt in prompts:
                         this_prompt_embed = self.text_encoder(this_prompt,mode='after_pool',to_numpy=False)[:,None]
@@ -160,9 +203,19 @@ class DriveDreamer2_Tester(Tester):
                         videos.append(images)
 
                     if save_dir is not None:
+                        # ### Save each generated prompt version with its own filename.
+                        for prompt_name, generated_frames in zip(('default', 'rainy', 'night'), videos):
+                            imageio.mimsave(
+                                os.path.join(save_dir, f'{clip_name}_generated_{prompt_name}.mp4'),
+                                [np.asarray(frame) for frame in generated_frames],
+                                fps=self.fps,
+                            )
                         images = draw_mv_video_v2(videos, batch_dict)
-                        imageio.mimsave(os.path.join(save_dir, '{:06d}.mp4'.format(idx)), images, fps=self.fps)
-                        idx += 1
+                        imageio.mimsave(
+                            os.path.join(save_dir, f'{clip_name}_comparison.mp4'),
+                            images,
+                            fps=self.fps,
+                        )
                 else:
                     images = self.model(
                                 prompt_embed[0:1].half(),
@@ -179,7 +232,19 @@ class DriveDreamer2_Tester(Tester):
                             )
                     images=images.frames[0]
                     if save_dir is not None:
-                        images = draw_mv_video(images, batch_dict)
-                        imageio.mimsave(os.path.join(save_dir, '{:06d}.mp4'.format(idx)), images, fps=self.fps)
-                    idx += 1     
+                        # ### Save generated and comparison videos as separate files.
+                        imageio.mimsave(
+                            os.path.join(save_dir, f'{clip_name}_generated.mp4'),
+                            [np.asarray(frame) for frame in images],
+                            fps=self.fps,
+                        )
+                        comparison = draw_mv_video(images, batch_dict)
+                        imageio.mimsave(
+                            os.path.join(save_dir, f'{clip_name}_comparison.mp4'),
+                            comparison,
+                            fps=self.fps,
+                        )
+                # ### Process only the first test clip.
+                idx += 1
+                break
         self.accelerator.wait_for_everyone()

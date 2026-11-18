@@ -1,14 +1,14 @@
 import os
 # ============= PATH ===================
 proj_name = os.path.basename(__file__)[:-3]
-exp_dir = '/mnt/data-2/users/zhaoguosheng/1-code/16-drivedreamer2_release/exp'  # PATH TO YOUR EXPERIMENT FOLDER
+exp_dir = '/workspace/exp'
 project_dir = os.path.join(exp_dir, proj_name)
-train_data = '/mnt/pfs/datasets/giga_datasets/public_data/nuscenes/v1.0-trainval/cam_all_train/v0.0.2'
-test_data = '/mnt/pfs/datasets/giga_datasets/public_data/nuscenes/v1.0-trainval/cam_all_val/v0.0.2'
-embed_map_path = '/mnt/pfs/datasets/giga_datasets/public_data/nuscenes/clip_text_transform_after_pool_panoramic.pkl'
+train_data = '/workspace/data/processed/v1.0-mini/cam_all_train/v0.0.2'
+test_data = '/workspace/data/processed/v1.0-mini/cam_all_val/v0.0.2'
+embed_map_path = '/workspace/data/nuscenes/clip_text_transform_after_pool_panoramic.pkl'
 
-weight_path = '/mnt/data-2/users/zhaoguosheng/1-code/16-drivedreamer2_release/pretrained_models/drivedreamer2_img_cond/pytorch_gligen_weights.bin' # PATH TO YOUR MODEL  set None to load the latest checkpoint in your project_dir
-save_path = '/mnt/data-2/users/zhaoguosheng/1-code/16-drivedreamer2_release/output/v1.0-trainval/drivedreamer2_img_cond' # PATH FOR SAVING GENERATED VIDEO
+weight_path = '/workspace/pretrained_models/drivedreamer2_img_cond/pytorch_gligen_weights.bin'  # set None to load the latest checkpoint in your project_dir
+save_path = '/workspace/output/v1.0-mini/drivedreamer2_img_cond'
 
 # ============= Data Parameters =================
 resolution=(256, 448)
@@ -89,13 +89,13 @@ config = dict(
         ),
     ),
     models=dict(
-        pretrained='/mnt/pfs/models/huggingface/models--stabilityai--stable-video-diffusion-img2vid-xt-1-1',
-        text_encoder_pretrained='cerspense/zeroscope_v2_576w',
+        pretrained='/workspace/pretrained_models/stable-video-diffusion-img2vid-xt-1-1',
+        text_encoder_pretrained=None,
         # checkpoint='PATH/TO/YOUR/CHECKPOINT', # resume training
         weight_path=weight_path,
         mode = mode,
         enable_gradient_checkpointing=False,
-        local_files_only = True,
+        local_files_only=True,
         train_temp = True,
         pipeline_name='DriveDreamer2Pipeline',
         add_in_channels=gd_add_channel+box_add_channel,
